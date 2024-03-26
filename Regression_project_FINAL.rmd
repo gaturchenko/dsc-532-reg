@@ -1,0 +1,1863 @@
+---
+title: "Regression_Project"
+author: "Elena Andreou,Panikos Christou,Grigori Turchenko "
+date: "2023-03-20"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+# Preinstallation steps
+
+```{r}
+# Run this if you are not certain you have the below libraries
+
+#install.packages('utils')
+ #install.packages('dplyr')
+ #install.packages('tidyverse')
+#install.packages('gridExtra')
+#install.packages('psych')
+ #install.packages('moments')
+ #install.packages('DMwR')
+#install.packages('caret')
+ #install.packages('MASS')
+ #install.packages('rpart')
+#install.packages('randomForest')
+#install.packages('gbm')
+#install.packages('e1071')
+#install.packages('class')
+ #install.packages('ggplot2')
+# install.packages("reshape2") 
+ #install.packages("leaps") 
+#install.packages("nortest") 
+ #install.packages("forcats") 
+#install.packages("fitdistrplus")
+ #install.packages("jtools")
+ #  install.packages("kknn")
+ #install.packages("ISLR2")
+# install.packages("vip")
+#install.packages("VGAM")
+#install.packages('fitdistrplus')
+# install.packages('actuar')
+
+
+```
+
+```{r setup code,echo=FALSE,include=FALSE}
+# Setup code for when we run the file to clear the environment, plots and console
+graphics.off() # Clear plots
+rm(list = ls()) # Clear workspace
+```
+
+```{r import libraries,echo=FALSE, warning=FALSE, message=FALSE}
+
+library(rlang)
+library(utils)
+library(dplyr)
+library(tidyverse)
+library(gridExtra)
+library(psych)
+library(moments)
+library(caret) #for feature importance
+library(dplyr)
+library(MASS)
+library(rpart)
+library(randomForest)
+library(gbm)
+library(e1071)
+library(class)
+library(ggplot2)
+library(reshape2)
+library(leaps)
+library(nortest)
+library(forcats)
+library(fitdistrplus)
+library(jtools)
+library(dplyr)   
+library(kknn)
+library(ISLR2)
+library(VGAM)
+library(fitdistrplus)
+library(glmnet)
+library(actuar)
+```
+
+# 1. Data Description
+
+Import the dataset
+
+```{r import dataset,echo=FALSE}
+df<-read.csv("Customer_value.csv")
+str(df)
+
+```
+
+Let's explore the data set.
+
+#Check for duplicates:
+
+```{r duplicates check,echo=FALSE}
+cat("Are there any duplicates if we exclude the Customer column?",any(duplicated(df[which(colnames(df)!="Customer"),])))
+
+```
+
+We remove the unique Customer column because it doesn't provide some useful information.
+
+```{r}
+df = df[,-1]
+df_original<-df
+```
+
+Firstly that Effective.To.Date is a string representation of a date.
+So we convert this column of dates into the correct format, find the range of dates, and count the number of missing values.
+
+```{r date format,echo=FALSE}
+df$Effective.To.Date<-as.Date(df$Effective.To.Date,format="%m/%d/%y")
+cat("Earliest date available:",format(min(df$Effective.To.Date)),"\nLatest date available:",format(max(df$Effective.To.Date)),"\n")
+cat("Number of NAs:",sum(is.na(df$Effective.To.Date)))
+```
+
+The "Effective.To.Date" column in the dataset represent the date when a particular customer's insurance policy went into effect We see that we have data for customers whose policy ends in a 2 month period, from 1/1/2011 to 28/2/2011.
+
+#Check for missing values.
+
+```{r}
+# Find columns with NAs
+columns_with_na <- colnames(df)[apply(df, 2, function(x) any(is.na(x)))]
+
+print(columns_with_na)
+# Print the number of NAs in each column
+for (column in columns_with_na) {
+  num_na <- sum(is.na(df[[column]]))
+  cat("Column", column, "has", num_na, "NAs.\n")
+}
+```
+
+We don't have missing values.
+
+Get an overview of the data in a data frame, including the column names, data types, and summary statistics (minimum and maximum values).
+The bellow function: 1.
+Returns the names of the columns in the dataset.
+2.
+If the data type of the current column is a factor or a character, prints the unique values of the column.
+3.
+If the data type of the current column is not a factor or a character, checks if the data type is either numeric or integer and after prints the minimum and the maximum value.
+
+```{r}
+library(dplyr)
+
+for (col_name in colnames(df)) {
+  cat("\n", col_name, "\n", sep = "")
+  cat("--------------------\n")
+
+  if (is.factor(df[[col_name]]) || is.character(df[[col_name]])) {
+    cat("Unique Values:\n")
+    print(unique(df[[col_name]]))
+  } else if (is.numeric(df[[col_name]]) || is.integer(df[[col_name]])) {
+    min_value <- min(df[[col_name]], na.rm = TRUE)
+    max_value <- max(df[[col_name]], na.rm = TRUE)
+    cat("Min:", min_value, "\nMax:", max_value, "\n")
+  } else {
+    cat("Unknown data type\n")
+  }
+}
+```
+
+#Helpful fuctions
+
+```{r}
+library(rlang)
+
+create_boxplot <- function(df, num_col, cat_col) {
+  # Convert character column to factor
+  df[[cat_col]] <- as.factor(df[[cat_col]])
+  
+  # Calculate medians for each group
+  medians <- aggregate(df[[num_col]], by = list(df[[cat_col]]), FUN = median)
+  colnames(medians) <- c(cat_col, "Median")
+  
+  # Create the boxplot
+  p <- ggplot(df, aes(x = !!sym(cat_col), y = !!sym(num_col))) +
+    geom_boxplot(fill = "#69b3a2", color = "black") +
+    coord_flip()+
+    geom_text(data = medians, aes(x = !!sym(cat_col), y = Median, label = sprintf("Median: %.2f", Median)),
+              vjust = -2, size = 3.5, color = "blue")
+  
+  # Add labels and adjust the angle of the x-axis labels
+  p <- p +
+    labs(title = paste("Boxplot of", num_col, "by", cat_col), x = cat_col, y = num_col) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(p)
+}
+```
+
+```{r}
+models_summary = function(models, X_train, X_test, y_train, y_test, newx=T){
+  models_names = c()
+  subset = rep(c("train", "test"), length(models))
+  rmse = c()
+  mae = c()
+  r2 = c()
+  for(i in 1:length(models)){
+    models_names = append(models_names, names(models)[[i]])
+    models_names = append(models_names, names(models)[[i]])
+    if(newx){
+      pred_train = predict(models[[i]], newx=X_train)
+      pred_test = predict(models[[i]], newx=X_test)
+    }
+    else {
+      pred_train = predict(models[[i]], newdata=X_train)
+      pred_test = predict(models[[i]], newdata=X_test)
+    }
+    
+    rmse = append(rmse, RMSE(pred_train, y_train))
+    rmse = append(rmse, RMSE(pred_test, y_test))
+    
+    mae = append(mae, MAE(pred_train, y_train))
+    mae = append(mae, MAE(pred_test, y_test))
+    
+    r2 = append(r2, R2(pred_train, y_train))
+    r2 = append(r2, R2(pred_test, y_test))
+  }
+  return(data.frame(list(
+    Model=models_names, Subset=subset, RMSE=rmse, MAE=mae, R2=r2
+  )) %>% dplyr::arrange(desc(Subset)))
+}
+
+selection_summary = function(models, predictors, train, test){
+  models_names = c()
+  subset = rep(c("train", "test"), length(models))
+  rmse = c()
+  mae = c()
+  r2 = c()
+  predict(fwd_opt, test, id=14)
+  for(i in 1:length(models)){
+    models_names = append(models_names, names(models)[[i]])
+    models_names = append(models_names, names(models)[[i]])
+    
+    pred_train = predict(models[[i]], train, predictors[[i]])
+    pred_test = predict(models[[i]], test, predictors[[i]])
+    print(models[[i]])
+    rmse = append(rmse, RMSE(pred_train, train$Customer.Lifetime.Value.Log))
+    rmse = append(rmse, RMSE(pred_test, test$Customer.Lifetime.Value.Log))
+    
+    mae = append(mae, MAE(pred_train, train$Customer.Lifetime.Value.Log))
+    mae = append(mae, MAE(pred_test, test$Customer.Lifetime.Value.Log))
+    
+    r2 = append(r2, R2(pred_train, train$Customer.Lifetime.Value.Log))
+    r2 = append(r2, R2(pred_test, test$Customer.Lifetime.Value.Log))
+  }
+  return(data.frame(list(
+      Model=models_names, Subset=subset, RMSE=rmse, MAE=mae, R2=r2
+    )) %>% dplyr::arrange(desc(Subset)))
+}
+```
+
+```{r}
+train_test_split = function(df){
+  set.seed(532)
+  train_ind = createDataPartition(df$Customer.Lifetime.Value.Log, p = 0.75, list = FALSE)
+  train = df[train_ind, ]
+  test = df[-train_ind, ]
+  return(list(train=train, test=test))
+}
+```
+
+```{r}
+plot_subset_selection = function(bss_fit){
+  bss_sum = summary(bss_fit)
+  
+  bic_min = which.min(bss_sum$bic)
+  cp_min = which.min(bss_sum$cp)
+  rss_min = which.min(bss_sum$rss)
+  adjr2_max = which.max(bss_sum$adjr2)
+  
+  par(mfrow=c(2, 2))
+  plot(bss_sum$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+  title(main=paste("Optimal Number of Predictors:", bic_min, collapse=" "))
+  points(bic_min, bss_sum$bic[bic_min], col = "red", cex = 2, pch = 20)
+  
+  plot(bss_sum$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+  title(main=paste("Optimal Number of Predictors:", cp_min, collapse=" "))
+  points(cp_min, bss_sum$cp[cp_min], col = "red", cex = 2, pch = 20)
+  
+  plot(bss_sum$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+  title(main=paste("Optimal Number of Predictors:", rss_min, collapse=" "))
+  points(rss_min, bss_sum$rss[rss_min], col = "red", cex = 2, pch = 20)
+  
+  plot(bss_sum$adjr2, xlab = "Number of Variables", ylab = "Adjusted R2", type = "l")
+  title(main=paste("Optimal Number of Predictors:", adjr2_max, collapse=" "))
+  points(adjr2_max, bss_sum$adjr2[adjr2_max], col = "red", cex = 2, pch = 20)
+}
+```
+
+```{r}
+hettest_plots = function(fit){
+  par(mfrow=c(2, 2))
+  plot(fit)
+}
+```
+
+```{r}
+encode_to_factor <- function(df, col_name) {
+  # Convert column to factor
+  df[[col_name]] <- factor(df[[col_name]], levels = unique(df[[col_name]]))
+  
+  # Return modified data frame
+  return(df)
+}
+```
+
+```{r}
+boxplot_with_labels <- function(df, col_name) {
+ 
+    ggplot(df, aes(x="", y=!!sym(col_name))) + 
+      geom_boxplot(fill="#69b3a2", color="Black") +
+      stat_summary(fun=median, geom="text", aes(label=paste0("Median: ", round(..y.., 2))), 
+                   vjust=-2, size=4, color="black", fontface="bold", position=position_nudge(x=-0.25)) +
+      labs(title=paste0("Boxplot of ", col_name, " (median only)"))+
+      labs(title=paste0("Boxplot of ", col_name))
+  }
+
+```
+
+```{r}
+plot_num_univar = function(df, col){
+  ggplot(df, aes(x = !!sym(col)))+
+    geom_histogram(color="black", fill="cadetblue3")+
+    ggtitle(paste(gsub("\\.", " ", col), "Distribution", collapse=" ")) +
+    xlab(gsub("\\.", " ", col)) +
+    ylab("Count") +
+    theme_bw()
+}
+```
+
+```{r}
+# Check if "plots" folder exists and create it if not
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+
+
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+create_horizontal_boxplot <- function(df, num_col, cat_col, vjust_med=-4, no_labels=F, no_xlabs=F) {
+  # Convert character column to factor
+  df[[cat_col]] <- as.factor(df[[cat_col]])
+  
+  # Calculate medians, Q1, Q3, and whiskers for each group
+  summary_stats <- df %>%
+    group_by(!!sym(cat_col)) %>%
+    summarise(Median = median(!!sym(num_col)),
+              Q1 = quantile(!!sym(num_col), 0.25),
+              Q3 = quantile(!!sym(num_col), 0.75),
+              Whisker_low = min(!!sym(num_col)),
+              Whisker_high = max(!!sym(num_col)))
+  
+  # Create the horizontal boxplot
+  if(no_xlabs == F){
+    p <- ggplot(df, aes(x = !!sym(cat_col), y = !!sym(num_col))) +
+    geom_boxplot(fill = "#69b3a2", color = "black") +
+    coord_flip() +
+    labs(title = paste("Horizontal Boxplot of", num_col, "by", cat_col), x = cat_col, y = num_col)
+  }
+  else {
+    p <- ggplot(df, aes(x = !!sym(cat_col), y = !!sym(num_col))) +
+    geom_boxplot(fill = "#69b3a2", color = "black") +
+    coord_flip() +
+    labs(x = cat_col, y = num_col)
+  }
+  
+
+  if(no_labels == F){
+      # Add median, Q1, Q3, and whisker labels
+ p <- p +
+    geom_text(data = summary_stats, aes(x = !!sym(cat_col), y = Median, label = sprintf("Median: %.2f", Median)),
+              vjust = vjust_med, size = 2, color = "blue") +
+    # geom_text(data = summary_stats, aes(x = !!sym(cat_col), y = Q1, label = sprintf("Q1: %.2f", Q1)),
+    #           vjust = -1.5, size = 2, color = "red") +
+    # geom_text(data = summary_stats, aes(x = !!sym(cat_col), y = Q3, label = sprintf("Q3: %.2f", Q3)),
+    #           vjust = 0, size = 2, color = "green") +
+    # geom_text(data = summary_stats, aes(x = !!sym(cat_col), y = Whisker_low, label = sprintf("Low Whisker: %.2f", Whisker_low)),
+    #           vjust = 1.5, size = 2, color = "purple") +
+    geom_text(data = summary_stats, aes(x = !!sym(cat_col), y = Whisker_high, label = sprintf("Max %.2f", Whisker_high)),
+              vjust = 3, size = 2, color = "orange")
+  }
+
+  
+  return(p)
+}
+```
+
+```{r}
+predict.regsubsets <- function(object, newdata, id, ...) {
+  form <- as.formula(object$call[[2]])
+  mat <- model.matrix(form, newdata)
+  coefi <- coef(object, id = id)
+  xvars <- names(coefi)
+  mat[, xvars] %*% coefi
+ }
+```
+
+```{r}
+scale_vars <- function(df) {
+  num_cols <- sapply(df, is.numeric) & names(df) != "Customer.Lifetime.Value.Log"
+  df[num_cols] <- lapply(df[num_cols], scale)
+  return(df)
+}
+```
+
+# 2. Exploratory Data Analysis
+
+## 2.1 Feature exploration and modification (Univariate and Bivariate Analysis)
+
+### 2.1.1 Target Variable: ' Customer.Lifetime.Value '
+
+```{r Customer Lifetime value}
+plot  = ggplot(df, aes(x=Customer.Lifetime.Value)) + 
+  geom_histogram(binwidth=500, fill="#69b3a2", color="#e9ecef") +
+  labs(title="Histogram of Customer Lifetime Value", x="Customer Lifetime Value", y="Count")
+plot
+```
+
+Customer Lifetime values range between 1898 and 83325.The majority of customers CLV is from 1898-83325.
+The distribution seems to be positively skewed with some extremely large values of CLV appearing very few times.
+
+In order to see the characteristics of customers with the higher CLV we get a subset the dataframe to include only rows with Customer.Lifetime.Value \> 50,000.
+
+```{r}
+# subset the dataframe to include only rows with Customer.Lifetime.Value > 50,000
+df_subset <- subset(df, Customer.Lifetime.Value > 50000)
+
+# print the subsetted dataframe
+print(df_subset)
+```
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value
+boxplot_with_labels(df,'Customer.Lifetime.Value')
+```
+
+Count the number of outliers in the Customer.Lifetime.Value variable
+
+```{r}
+outliers <- boxplot.stats(df$Customer.Lifetime.Value)$out
+n_outliers <- length(outliers)
+cat("The number of outliers in Customer Lifetime Value is:", n_outliers, "\n")
+```
+
+```{r}
+n_outliers/nrow(df)
+```
+
+We see we have a dense boxplot with 816 upper outliers.
+Which make up of 8% of our data so we should not drop them.
+
+Distribution of the target variable
+
+The distribution is heavily right-skewed, and all the data points are positive, but not integer.
+Let us try to determine what kind of distribution the variable may follow.The following object can be used to compare the fit of the different distributions and select the best-fitting distribution for the target variable.The "fitdist()" function searches for the values of the distribution parameters that maximize the likelihood of observing the data in the "Customer.Lifetime.Value" column.
+
+```{r}
+gamma_fit = fitdist(df$Customer.Lifetime.Value / 10, "gamma")
+weibull_fit = fitdist(df$Customer.Lifetime.Value / 10, "weibull")
+lnorm_fit = fitdist(df$Customer.Lifetime.Value / 10, "lnorm")
+#pareto_fit = fitdist(df$Customer.Lifetime.Value /10 , "pareto", start = list(shape = 1, scale = 500))
+#fits = list(gamma_fit, weibull_fit, lnorm_fit, pareto_fit)
+#names = c("Gamma", "Weibull", "Log-Normal", "Pareto")
+
+par(mfrow = c(1, 2))
+plot.legend = names
+#denscomp(fits, legendtext = plot.legend)
+#qqcomp(fits, legendtext = plot.legend)
+```
+
+As can be seen from the QQ-plot, among the four assumed distributions, customer lifetime value in our case most likely follows the Pareto distribution.
+However, log-normal distribution, despite not being the best fit, could be still a reasonable choice at least for the sake of simplicity.
+Let us then add a log-trasnformed version of CLV to the data set.
+
+```{r}
+df$Customer.Lifetime.Value.Log = log(df$Customer.Lifetime.Value)
+plot_num_univar(df, "Customer.Lifetime.Value.Log")
+```
+
+### 2.1.2 State
+
+```{r State}
+# Create a frequency table of State column
+state_freq <- table(df$State)
+
+# Create a bar plot of State column
+ggplot(data = as.data.frame(state_freq), aes(x = Var1, y = Freq)) +
+  geom_bar(stat = "identity", fill = "#69b3a2", color="Black") +
+  labs(title="Bar Plot of States", x="State", y="Frequency")
+```
+
+We can see that we have customers from 5 different US States.
+The majority are from California and the minority from Washington.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each state
+create_horizontal_boxplot(df, "Customer.Lifetime.Value", "State", -6) 
+
+```
+
+1.Customers from Washington have the lowest median lifetime value (around 5500), whereas others have higher with Oregon having the highest median and also the biggest outliers.
+2.The median is around 5600 for all States.
+3.The boxplots do not really indicate any significant difference.
+
+Lets encode it as a factor.
+
+```{r}
+df = df %>% mutate(State=as.factor(State))
+```
+
+### 2.1.3 Response
+
+```{r Response}
+# Create a bar plot of Response
+ggplot(df, aes(x=Response)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Bar Plot of Response", x="Response", y="Count")
+```
+
+The response column refers to whether or not a customer responded to a marketing campaign.
+The majority of the customers do not respond.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Response
+create_horizontal_boxplot(df, "Customer.Lifetime.Value", "Response", -12) 
+
+```
+
+We can see that Customers who do not respond have larger CLV.
+Maybe no response indicate a higher CLV or this has to do with the fact that he have almost four times more no response customers.
+
+Convert the data type of the Response column to a factor.
+
+```{r}
+df = df %>% mutate(Response=as.factor(Response))
+```
+
+### 2.1.4 Coverage
+
+```{r Coverage}
+# Create a bar plot of Coverage
+ggplot(df, aes(x=Coverage)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Bar Plot of Coverage", x="Coverage", y="Count")
+
+```
+
+The Basic coverage is preferred by the majority of customers, followed by the Extended coverage with half the frequency, and finally the Premium coverage is the least popular.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Response
+create_horizontal_boxplot(df, "Customer.Lifetime.Value", "Coverage", -9) 
+
+```
+
+Premium Coverage seems to have a higher median.Also the distribution of CLV for premium Coverage is shifted to the right in comparison with that of extended and basic Coverage.
+So, in general, customers with premium coverage seem to have a higher CLV.
+
+We are going to encode it from 1 to 3(since it is an ordinal variable).
+Encoding an ordinal variable with levels in a linear regression model can provide more interpretable results.
+The estimated coefficients for the levels of the ordinal variable can directly represent the effect or impact of each level on the outcome variable, allowing for easier interpretation of the results.
+
+```{r}
+df = df %>% mutate(Coverage=as.factor(Coverage))
+```
+
+### 2.1.5 Education
+
+```{r Education}
+# Create a bar plot of Education
+ggplot(df, aes(x=Education)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Bar Plot of Education", x="Education", y="Count")
+
+```
+
+We see that most customers have a bachelor, a college and a HighSchool or Below degree.
+Then less people Have a masters and even less are doctors.
+
+```{r}
+Education_counts <- table(df$Education)
+Education_proportion <- prop.table(Education_counts)
+
+# Print the counts and proportion of Education
+cat("Education Counts:\n")
+print(Education_counts)
+
+cat("Education proportion:\n")
+print(Education_proportion)
+```
+
+The majority of the customers have bachelor,college or High School/Below education (more than 2000), whereas the minority have doctor or master education(\<500).
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Education
+create_horizontal_boxplot(df, 'Customer.Lifetime.Value','Education', -6)
+
+```
+
+We see here that CLV for Highschool or below seems to be higher than the rest so hope it helps later.
+
+Convert the data type of the Education column to a factor.
+
+```{r}
+# Convert Coverage column from "01" and "02" to 1 and 2, respectively
+df = df %>% mutate(Education=as.factor(Education))
+```
+
+### 2.1.6 Effective.To.Date
+
+Lets extract the month and see how it effects CLV
+
+```{r Effective.To.Date}
+# Convert Effective.To.Date to date object and extract month and year
+df$Month <- format(df$Effective.To.Date, "%m")
+
+
+#Create a boxplot of Customer.Lifetime.Value for each month
+create_horizontal_boxplot(df,'Customer.Lifetime.Value' , 'Month', -12)
+
+
+```
+
+As we can see median is almost the same for both months and there is not much difference in the range so lets factor it.
+
+```{r}
+# Convert Month column from "01" and "02" to 1 and 2, respectively
+df = df %>% mutate(Month=as.factor(Month))
+```
+
+```{r}
+#df <- df[, !names(df) %in% c("Effective.To.Date")]
+df = df %>% dplyr::select(-Effective.To.Date)
+```
+
+### 2.1.7 EmploymentStatus
+
+```{r EmploymentStatus}
+# Create a barplot of the count of each EmploymentStatus level
+ggplot(df, aes(x=EmploymentStatus, fill=EmploymentStatus)) + 
+  geom_bar() +
+  labs(title="Barplot of Employment Status Counts", x="Employment Status", y="Count")
+
+```
+
+We see that most data are for emloyed or unemployed customers.
+
+Lets see the boxplots by the outcome.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each EmploymentStatus
+p = create_horizontal_boxplot(df,'Customer.Lifetime.Value','EmploymentStatus', -6)
+p 
+```
+
+Most of the customers are either unemployed or employed, with a minority not working for a reason.
+As a sanity check, let us explore the employment statuses in the frame of income.
+
+```{r}
+create_horizontal_boxplot(df,'Income','EmploymentStatus', -5)
+```
+
+Based on the chart above, it is evident that the retired, customers on a medical leave, and the disabled ones have a very similar distribution of income.
+Therefore, due to such homogeneity, these 3 can be merged into 1 group named 'Economically inactive'.
+All the unemployed, on the other hand, have 0 income, which is exactly as expected from common sense.
+
+```{r}
+df = df %>% mutate(EmploymentStatus=recode_factor(EmploymentStatus, "Disabled"="Economically Inactive", "Medical Leave"="Economically Inactive", "Retired"="Economically Inactive"))
+```
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for the final three categories of EmploymentStatus.
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','EmploymentStatus', -8)
+```
+
+### 2.1.8 Gender
+
+```{r Gender}
+# Create a barplot of the count of each Gender level
+ggplot(df, aes(x=Gender, fill=Gender)) + 
+  geom_bar() +
+  labs(title="Barplot of Gender Counts", x="Gender", y="Count")
+```
+
+Pretty balanced dataset when it comes to the genders, lets see the boxplots of CLV by gender.
+
+```{r}
+
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Gender', -12)
+```
+
+We can see that the medians of the genders dont have so much difference and the range of CLV values is almost the same.
+
+Convert the gender to a factor variable.
+
+```{r}
+df = df %>% mutate(Gender=as.factor(Gender))
+head(df$Gender, 10)
+```
+
+### 2.1.9 Income
+
+```{r Income}
+# Create the histogram of the income above 0.
+ggplot(filter(df, Income != 0), aes(x = Income)) +
+  geom_histogram(binwidth = 1000, color = "black", fill = "blue", alpha = 0.6) +
+  labs(title = "Histogram of Income above 0 ", x = "Income", y = "Frequency")
+
+```
+
+Based on the histogram of the "Income" variable, we can see that the majority of the observations are clustered around the value of 25,000, which is the most frequent value in the distribution.
+
+Let's if we have observations in the data with a zero value for "Income", and what proportion of the data they represent.
+
+```{r check for income equal to 0}
+nrow(filter(df, Income ==0))
+
+nrow(filter(df, Income ==0))/nrow(df)
+```
+
+Create a scatter plot of Income and Customer.Lifetime.Value.
+
+```{r}
+ggplot(df, aes(x=Income, y=Customer.Lifetime.Value)) + 
+  geom_point() +
+  labs(title="Scatter plot of Income and Customer Lifetime Value", x="Income", y="Customer Lifetime Value")
+```
+
+A scatter plot with no patterns implies that there is no clear relationship between the two variables being plotted.
+As we said before we can see that many customers have income equal to 0.
+Merely dropping those might be too excessive.
+Let us first see how valuable they are to the company.
+
+```{r}
+plot_num_univar(df %>% filter(Income == 0), "Customer.Lifetime.Value")
+```
+
+The CLV distribution looks quite representative, which means these clients are no worse than the rest, who claim to earn something.
+It would be reasonable to assume these people are students or unemployed.
+
+```{r}
+df %>% filter(Income == 0) %>%  group_by(EmploymentStatus, Education) %>% summarise(Count = n()) %>% arrange(desc(Count))
+```
+
+All the customers with zero income are unemployed, and a majority of them are either freshmen, or had finished the first cycle of education.
+All in all, despite a possible negative effect on the model, this customer segment shall be kept nonetheless.
+Let us then see if there is a possible relationship between income and CLV
+
+Lets see the correlation though of Income and CLV
+
+```{r}
+# Calculate the correlation between Income and Customer.Lifetime.Value
+cor(df$Income, df$Customer.Lifetime.Value)
+```
+
+This indicates a very weak positive correlation between the two variables.
+
+### 2.1.10 Location Code
+
+```{r Location Code}
+# Create a bar plot of the count of each Location.Code level
+ggplot(df, aes(x=Location.Code, fill=Location.Code)) + 
+  geom_bar() +
+  labs(title="Barplot of Location Code Counts", x="Location Code", y="Count")
+```
+
+The majority of the customers are from Suburban.
+
+```{r}
+# Create a box plot of Customer.Lifetime.Value for each Location.Code
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Location.Code', -8)
+
+```
+
+We again see there is not much difference when it comes to Location Code and CLV.
+The only difference is that customers with Suburban location code have larger values of CLV.
+
+Lets encode it as a factor.
+
+```{r}
+df = df %>% mutate(Location.Code=as.factor(Location.Code))
+```
+
+### 2.1.11 Marital.Status
+
+```{r}
+ggplot(df, aes(x=Marital.Status, fill=Marital.Status)) + 
+  geom_bar() +
+  labs(title="Barplot of Marital Status Counts", x="Marital Status", y="Count")
+
+```
+
+We see most people are Married so lets see if it affects CLV.
+
+```{r}
+# Create a box plot of Customer.Lifetime.Value for each Marital.Status
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Marital.Status', -9)
+
+```
+
+Single people have a slightly lower median, also single and married people have larger CLV.
+
+Lets encode it as a factor
+
+```{r}
+df = df %>% mutate(Marital.Status=as.factor(Marital.Status))
+```
+
+### 2.1.12 Monthly.Premium.Auto
+
+```{r}
+# Create a histogram of Monthly.Premium.Auto
+ggplot(df, aes(x=Monthly.Premium.Auto)) + 
+  geom_histogram(binwidth = 5, fill="#69b3a2", color="black") +
+  labs(title="Histogram of Monthly Premium Auto", x="Monthly Premium Auto", y="Count")
+```
+
+We see that most values are below 150.
+We can see that Monthly premium auto has a right skewed distribution.
+
+```{r}
+# Create a scatter plot of Monthly.Premium.Auto and Customer.Lifetime.Value
+ggplot(df, aes(x=Monthly.Premium.Auto, y=Customer.Lifetime.Value)) + 
+  geom_point() +
+  labs(title="Scatter plot of Monthly Premium Auto and Customer Lifetime Value", x="Monthly Premium Auto", y="Customer Lifetime Value")
+
+```
+
+From the scatter plot we can see a pattern between the two variables.
+It seemed to be a linear relationship between them.
+As the one variable increase, the values of the other variable increase as well.
+
+Lets see the correlation between them.
+
+```{r}
+# Calculate the correlation between Response_num and Customer.Lifetime.Value
+correlation <- cor(df$Monthly.Premium.Auto, df$Customer.Lifetime.Value)
+# Print the correlation between Response_num and Customer.Lifetime.Value
+cat("The correlation between Monthly.Premium.Auto and Customer Lifetime Value is:", correlation, "\n")
+```
+
+A value of 0.3962617 suggests that as "Monthly.Premium.Auto" increases, "Customer Lifetime Value" tends to increase as well, but the relationship is not extremely strong.
+
+### 2.1.13 Months.Since.Last.Claim
+
+```{r}
+# Create a histogram of Months.Since.Last.Claim
+ggplot(df, aes(x=Months.Since.Last.Claim)) + 
+  geom_histogram(binwidth = 2, fill="#69b3a2", color="black") +
+  labs(title="Histogram of Months Since Last Claim", x="Months Since Last Claim", y="Count")
+```
+
+We again see that the months appear to be slightly right skewed and slowly going down.
+
+```{r}
+# Create a scatter plot of Months.Since.Last.Claim and Customer.Lifetime.Value
+ggplot(df, aes(x=Months.Since.Last.Claim, y=Customer.Lifetime.Value)) + 
+  geom_point() +
+  labs(title="Scatter plot of Months Since Last Claim and Customer Lifetime Value", x="Months Since Last Claim", y="Customer Lifetime Value")
+```
+
+Here we do not see any patterns forming unfortunutely.
+
+```{r}
+# Calculate the correlation between Response_num and Customer.Lifetime.Value
+correlation <- cor(df$Months.Since.Last.Claim, df$Customer.Lifetime.Value)
+# Print the correlation between Response_num and Customer.Lifetime.Value
+cat("The correlation between Months.Since.Last.Claim and Customer Lifetime Value is:", correlation, "\n")
+```
+
+This value indicates a weak positive linear relationship between these two variables.
+
+### 2.1.14 Months.Since.Policy.Inception
+
+```{r}
+# Create a histogram of Months.Since.Policy.Inception
+ggplot(df, aes(x=Months.Since.Policy.Inception)) + 
+  geom_histogram(binwidth = 2, fill="#69b3a2", color="black") +
+  labs(title="Histogram of Months Since Policy Inception", x="Months Since Policy Inception", y="Count")
+```
+
+We see that the months are pretty uniform.
+
+```{r}
+# Create a scatter plot of Months.Since.Policy.Inception and Customer.Lifetime.Value
+ggplot(df, aes(x=Months.Since.Policy.Inception, y=Customer.Lifetime.Value)) + 
+  geom_point() +
+  labs(title="Scatter plot of Months Since Policy Inception and Customer Lifetime Value", x="Months Since Policy Inception", y="Customer Lifetime Value")
+
+```
+
+```{r}
+# Calculate the correlation between Months.Since.Policy.Inception and Customer.Lifetime.Value
+correlation <- cor(df$Months.Since.Policy.Inception, df$Customer.Lifetime.Value)
+# Print the correlation between Months.Since.Policy.Inception and Customer.Lifetime.Value
+cat("The correlation between Months.Since.Policy.Inception and Customer Lifetime Value is:", correlation, "\n")
+```
+
+A correlation coefficient of 0.009418381 between two variables indicates a very weak or negligible linear relationship.
+
+### 2.1.14 Number.of.Open.Complaints
+
+```{r}
+# Create a barplot of Number.of.Open.Complaints
+ggplot(df, aes(x=Number.of.Open.Complaints)) + 
+  geom_bar(binwidth = 1, fill="#69b3a2", color="black") +
+  labs(title="Barplot of Number of Open Complaints", x="Number of Open Complaints", y="Count")
+```
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Number.of.Open.Complaints value
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Number.of.Open.Complaints', -5)
+
+```
+
+From the boxplots we see that 0-1 Open complaints yield higher CLV and 4,5 yield lower in general.
+
+We decided to transform this variables to 2 categories: 0: 0 complaints 1: 1-5 complaints In this case, the new variable would allow for the investigation of whether or not having any open complaints is associated with different levels of customer lifetime value.
+
+```{r}
+df = df %>% mutate(Number.of.Open.Complaints=as.factor(ifelse(Number.of.Open.Complaints==0, 0, 1)))
+```
+
+```{r}
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Number.of.Open.Complaints', -12)
+```
+
+### 2.1.15 Number.of.Policies
+
+```{r}
+# Create a barplot of Number.of.Open.Complaints
+ggplot(df, aes(x=Number.of.Policies)) + 
+  geom_bar(binwidth = 1, fill="#69b3a2", color="black") +
+  labs(title="Barplot of Number of Policies", x="Number of Policies", y="Count")
+```
+
+We can see that the Number of Policies variables takes values from 1 up to 9.As the number of policies increase the frequency seems to decrease as well.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Number.of.Policies value
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Number.of.Policies', -3)
+
+```
+
+We can see that 2 policies have much higher median and very lower CLV compared to the other number of policies.
+Also the distribution of CLV of 2 policies is shifted to the right in comparison to the others.
+So, in general, customers with 2 policies seem to have a higher CLV.
+
+So we decided to group this column into num of policies 1 , 2 and 3+ to help capture the above data.
+Moreover is greatly reduces the dimensions form 9 to 3 and will help us after in the modeling to interpret easier the results.
+
+```{r}
+# Create a new factor column based on the numeric values
+df$Number.of.Policies <- factor(ifelse(df$Number.of.Policies == 1, "1",
+                                        ifelse(df$Number.of.Policies == 2, "2", "3+")))
+```
+
+See the boxplot again after the transformation.
+
+```{r}
+# Create a boxplot of Customer.Lifetime.Value for each Number.of.Policies value
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Number.of.Policies', -8)
+
+```
+
+### 2.1.16 Policy.Type
+
+```{r}
+# Create a bar plot of the counts of Policy.Type
+ggplot(df, aes(x=Policy.Type)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Counts of Policy Type", x="Policy Type", y="Count")
+
+```
+
+We have 3 types of policy and the most common is Personal Auto.
+
+```{r}
+# Create a box plot of Customer.Lifetime.Value for each Policy.Type
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Policy.Type', -9)
+```
+
+Here we that Special Auto Policy seems to yield higher CLV than the rest.
+
+Lets encode it as a factor
+
+```{r}
+df = df %>% mutate(Policy.Type=as.factor(Policy.Type))
+```
+
+### 2.1.17 Policy
+
+```{r}
+# Create a bar plot of the counts of Policy
+ggplot(df, aes(x=Policy)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Counts of Policy", x="Policy", y="Count")
+
+```
+
+```{r}
+# Calculate the proportions of each policy
+prop.table(table(df$Policy))
+```
+
+From the proportions and the barplot above we can see that the most frequent policy categories are "Personal L2" (23.2%) and "Personal L3" (37.5%), while the least frequent are "Special L1" (0.7%) and "Special L3" (1.6%).
+
+```{r}
+ #Create a box plot of Customer.Lifetime.Value for each Policy
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Policy', -3)
+
+```
+
+We see that Corporate L1 has the highest median, and Specials seem to have higher higher medians than others.
+However, since we already have a variable indicating a policy type, we do not need these specific types, and therefore drop the variable.
+
+```{r}
+df = df %>% dplyr::select(-Policy)
+```
+
+### 2.1.18 Renew.Offer.Type
+
+```{r}
+# Bar plot of Renew.Offer.Type
+ggplot(df, aes(x=Renew.Offer.Type)) +
+  geom_bar(fill="#69b3a2", color="black") +
+  labs(title="Bar plot of Renew.Offer.Type", x="Renew.Offer.Type", y="Count")
+```
+
+Most Customers choose the first option then the second and so on.
+
+```{r}
+# Box plot of Customer.Lifetime.Value for each Renew.Offer.Type
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Renew.Offer.Type', -7)
+```
+
+We see that offer 1 has a restively higher median than rest, as well as offer 4 having slightly less.
+
+Lets encode it as a factor
+
+```{r}
+df = df %>% mutate(Renew.Offer.Type=as.factor(Renew.Offer.Type))
+```
+
+### 2.1.19 Sales.Channel
+
+```{r}
+# Create a barplot of Sales.Channel
+ggplot(df, aes(x=Sales.Channel)) + 
+  geom_bar(fill="#69b3a2") +
+  labs(title="Barplot of Sales Channel", x="Sales Channel", y="Count")
+```
+
+```{r}
+# Box plot of Customer.Lifetime.Value for each Sales.Channel
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Sales.Channel', -7)
+```
+
+The median is almost the same.
+We can not conclude something useful from here.
+Lets encode it as a factor.
+
+```{r}
+df = df %>% mutate(Sales.Channel=as.factor(Sales.Channel))
+```
+
+### 2.1.20 Total.Claim.Amount
+
+```{r}
+# Create the histogram using ggplot2
+ggplot(df, aes(x = Total.Claim.Amount)) +
+  geom_histogram(binwidth = 15, color = "black", fill = "blue", alpha = 0.6) +
+  labs(title = "Total.Claim.Amount Distribution", x = "Total.Claim.Amount", y = "Frequency")
+
+```
+
+Based on the histogram, the total claim amount variable is positively skewed to the right, with most of the observations clustering around 500.
+This means that there are more policyholders who file claims for smaller amounts, while a smaller proportion of policyholders file claims for larger amounts.
+
+```{r}
+# Create a scatter plot of Total.Claim.Amount and Customer.Lifetime.Value
+ggplot(df, aes(x=Total.Claim.Amount, y=Customer.Lifetime.Value)) + 
+  geom_point() +
+  labs(title="Scatter plot of Total.Claim.Amount and Customer Lifetime Value", x="Total.Claim.Amount", y="Customer Lifetime Value")
+```
+
+We see a rather chaotic scatter but we can distinguish a small positive funnel.
+Basically as Claim amount goes up CLV seems to goes up as well.
+
+Lets see the correlation though of Income and CLV.
+
+```{r}
+# Calculate the correlation between Income and Customer.Lifetime.Value
+cor(df$Total.Claim.Amount, df$Customer.Lifetime.Value)
+```
+
+The correlation coefficient indicates a weak linear association between the variables.
+
+### 2.1.21 Vehicle.Class
+
+```{r}
+# Create a barplot of Vehicle.Class
+ggplot(df, aes(x=Vehicle.Class)) + 
+  geom_bar(fill="#69b3a2") +
+  labs(title="Barplot of Vehicle Class", x="Vehicle Class", y="Count")
+```
+
+The majority of the customers have four door cars and the minority have Luxury SUV and Luxury Car.
+
+```{r}
+# Box plot of Customer.Lifetime.Value for each Vehicle.Class
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Vehicle.Class', -5)
+```
+
+The distribution of CLV for Luxury SUV and Luxury Car is shifted to the right in comparison with the others classes.
+So, in general, customers who have vehicles from these 2 categories seem to have a higher CLV.
+In addition customers who have four door and two door car, seems to have lower CLV in comparison to the others.
+
+We decided to merge the 2 categories Luxury SUV and Luxury Car, because they have very similar characteristics.Let's see again the boxolot by the outcome with the new categories.
+
+```{r}
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Vehicle.Class', -5)
+```
+
+```{r}
+#Encode it to factor
+df = df %>% mutate(Vehicle.Class=recode_factor(Vehicle.Class, "Luxury SUV"="Luxury Car"))
+```
+
+### 2.1.22 Vehicle.Size
+
+```{r}
+# Create a barplot of Vehicle.Size
+ggplot(df, aes(x=Vehicle.Size)) + 
+  geom_bar(fill="#69b3a2") +
+  labs(title="Barplot of Vehicle.Size Class", x="Vehicle.Size Class", y="Count")
+
+```
+
+The frequency of medium size vehicle size is almost six times than the others.
+
+```{r}
+# Box plot of Customer.Lifetime.Value for each Vehicle.Size
+create_horizontal_boxplot(df,'Customer.Lifetime.Value','Vehicle.Size')
+```
+
+Encode it as factor.
+
+```{r}
+df = df %>% mutate(Vehicle.Size=as.factor(Vehicle.Size))
+```
+
+## 2.2 Continue the Bivariate Analysis
+
+In order to check the relationship of the parameters and the target value (outcome) we have already used overlaying plots (histograms, boxplots, density estimation) by the value of the target variable, to deduce any significant difference between the different Customer Lifetime values.
+
+### 2.2.1 Correlations
+
+```{r}
+library(reshape2)
+
+corr_mat = melt(cor(df %>% dplyr::select(Customer.Lifetime.Value.Log, Income, Months.Since.Last.Claim, Months.Since.Policy.Inception, Monthly.Premium.Auto, Total.Claim.Amount)))
+ggplot(corr_mat, aes(Var1, Var2, fill=value)) +
+  geom_tile() +
+  scale_fill_gradient(low="blue", high="red") +
+  labs(title="Correlation Heatmap", x=NULL, y=NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+There is moderate linear relationship between logarithm of CLV and monthly premium auto, as well as total claim amount, whereas for the remaining variables the linear relationship does not seem to be the case.
+Another notable conclusion from the figure above is that total claim amount and monthly premium are highly positively correlated.
+This indicates a multicollinearity issue, which will be addressed with designated feature selection techniques further.
+All in all, at least at the stage of EDA it is unlikely that the majority of the continuous predictors will have significant effect on the target variable.
+
+### 2.2.2 High Leverage Predictors
+
+```{r}
+library(gridExtra)
+
+p1 = ggplot(df, aes(x=Monthly.Premium.Auto)) + 
+  geom_histogram(binwidth = 5, fill="#69b3a2", color="black") +
+  labs(title="Histogram of Monthly Premium Auto", x="Monthly Premium Auto", y="Count")
+
+p2 = ggplot(df, aes(x = Total.Claim.Amount)) +
+  geom_histogram(binwidth = 15, fill = "blue", color = "black", alpha = 0.6) +
+  labs(title = "Total.Claim.Amount Distribution", x = "Total.Claim.Amount", y = "Frequency")
+
+grid.arrange(p1, p2, ncol=1)
+```
+
+### 2.2.3 Significant Categorical Predictors
+
+```{r}
+p1 = create_horizontal_boxplot(df, "Customer.Lifetime.Value", "Coverage", -9, T, T) 
+p2 = create_horizontal_boxplot(df,'Customer.Lifetime.Value','Number.of.Policies', -3, T, T)
+p3 = create_horizontal_boxplot(df,'Customer.Lifetime.Value','Renew.Offer.Type', -7, T, T)
+p4 = create_horizontal_boxplot(df,'Customer.Lifetime.Value','Vehicle.Class', -5, T, T)
+
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+### 2.2.4 Policy and Policy Type
+
+```{r}
+p1 = create_horizontal_boxplot(df,'Customer.Lifetime.Value','Policy.Type', -9, T)
+p2 = create_horizontal_boxplot(df_original,'Customer.Lifetime.Value','Policy', -3, T)
+grid.arrange(p1, p2, ncol=1)
+```
+
+# 3. Regression Analysis
+
+#Interaction Terms: Four interaction terms were created and will be briefly discussed in the report: 1.Monthly Premium and Coverage 2.Vehicle Class and Vehicle Size 3.Coverage and Renew Offer Type 4.Sales Channel and Policy Type
+
+## 3.1 OLS Regression
+
+The first model utilized was ordinary least squares (OLS) regression.
+It provides a high degree of interpretability and serves as a good starting point for the analysis.
+
+```{r}
+library(MASS)
+library(ISLR2)
+formula = Customer.Lifetime.Value.Log ~. + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type
+```
+
+Let's see our final df after all the transformations.
+
+```{r}
+df_clv = df
+df = df %>% dplyr::select(-Customer.Lifetime.Value)
+length(names(df))
+str(df)
+```
+
+### 3.1.1 Full Model
+
+```{r Multiple Linear Regression}
+lm.full <- lm(formula, data = df)
+summary(lm.full)
+```
+
+Some significance is already evident based on p-values.
+However, before making any conclusions, let us first check model assumptions
+
+```{r}
+hettest_plots(lm.full)
+```
+
+The q-q plot indicates that the residuals in our regression model have a right heavy tails.Additionaly, we can see that we have non-constant variance error terms.The variance before point 9.0 on the x-axis and after it has significantly different magnitude This is a clear indication of heteroscedasticity.
+Therefore, a first problem with OLS model was identified.
+As an immediate remedy, let us try weighted least squares (WLS)
+
+### 3.1.2 Weighted least squares (WLS)
+
+```{r}
+weights = 1 / lm(abs(lm.full$residuals) ~ lm.full$fitted.values)$fitted.values^2
+lm.full_wls <- lm(formula, data = df, weights = weights)
+summary(lm.full_wls)
+```
+
+Almost all the predictors are statistically significant.
+However, it is necessary to check if heteroscedasticity is absent
+
+```{r}
+hettest_plots(lm.full_wls)
+```
+
+There is very little, if any, improvement in making variance of the residuals more constant.
+Therefore, it is concluded that OLS regression is not applicable in the context of the problem at hand.
+Heteroscedasticity indicates likely absence of linearity, hence the conclusions made from such a model will be biased.
+Heteroscedasticity can affect the reliability of metrics such as adjusted R-squared, BIC (Bayesian Information Criterion), etc., as these metrics assume normality of residuals and homoscedasticity (equal variances of residuals).
+Therefore, relying solely on these metrics for feature selection may not be appropriate in such cases.
+
+Instead, performing feature selection during the cross-validation phase can be a better approach.
+During the cross-validation process, feature selection techniques, such as forward,backward elimination, or best subset selection, can be applied on the training folds to identify the optimal set of features that consistently perform well across different folds.
+This can help mitigate the impact of non-normality of residuals.
+
+We will therefore continue with the implementation of subset selection and shrinkage methods with cross-validation on top.
+
+## 3.2 Cross Validation with Feature selection
+
+```{r}
+split = train_test_split(df)
+train = split$train
+test = split$test
+```
+
+### 3.2.1 Best Subset Selection
+
+Let us declare some parameters first
+
+```{r}
+set.seed(532)
+nvmax = length(colnames(model.matrix(Customer.Lifetime.Value.Log ~., data=train))) - 1
+k = 5
+folds <- sample(rep(1:k, length = nrow(train)))
+cv.errors <- matrix(NA, k, nvmax, dimnames = list(NULL, paste(1:nvmax)))
+```
+
+For the BSS interaction terms will not be included due to high computational cost.
+
+```{r}
+set.seed(532)
+for (j in 1:k) {
+  best.fit <- regsubsets(Customer.Lifetime.Value.Log ~.,
+       data = train[folds != j, ],
+       nvmax = nvmax)
+  for (i in 1:nvmax) {
+    pred <- predict(best.fit, train[folds == j, ], id = i)
+    cv.errors[j, i] <-
+         mean((train$Customer.Lifetime.Value.Log[folds == j] - pred)^2)
+   }
+ }
+```
+
+Let us calculate mean cross-validation error and find out how many predictors yield the lowest error
+
+```{r}
+mean.cv.errors <- apply(cv.errors, 2, mean)
+bss_opt_preds = which.min(mean.cv.errors)
+plot(mean.cv.errors, type = "b", col = ifelse(1:length(mean.cv.errors) == bss_opt_preds, "red", "black"), main="Best Subset Selection Mean CV Error", xlab="Predictors Used", ylab="Mean CV Error")
+```
+
+Cross-validation suggests the model with 21 predictors.
+Let us then refit BSS and consider various criteria to see if there is even lower number of variables
+
+```{r}
+bss_opt <- regsubsets(Customer.Lifetime.Value.Log ~., data = train, nvmax = bss_opt_preds)
+plot_subset_selection(bss_opt)
+```
+
+Different metrics suggest different number of predictors.
+Since the dimensionality of the data is rather high and judging the importance by p-values is not possible, let us opt for the lowest number of features, which is suggested by BIC.
+Finally, let us see what the most important features are according to best subset selection
+
+```{r}
+p=11
+coef(bss_opt, p)
+```
+
+### 3.2.2 Forward Stepwise Selection
+
+Now we shall apply forward stepwise selection.
+The main difference between forward stepwise selection and forward selection is that forward stepwise selection may also remove predictors that were previously added to the model, if their contribution is no longer significant after adding additional predictors.
+For this method we can incorporate interaction terms as well, since it does not carry out exhaustive search.
+
+```{r}
+nvmax = length(colnames(model.matrix(Customer.Lifetime.Value.Log ~ . + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type, data=train))) - 1
+cv.errors.fwd <- matrix(NA, k, nvmax, dimnames = list(NULL, paste(1:nvmax)))
+```
+
+```{r}
+set.seed(532)
+for (j in 1:k) {
+  best.fit <- regsubsets(Customer.Lifetime.Value.Log ~ . + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type,
+       data = train[folds != j, ],
+       nvmax = nvmax, method = "forward")
+  for (i in 1:nvmax) {
+    pred <- predict(best.fit, train[folds == j, ], id = i)
+    cv.errors.fwd[j, i] <-
+         mean((train$Customer.Lifetime.Value.Log[folds == j] - pred)^2)
+   }
+ }
+```
+
+```{r}
+mean.cv.errors.fwd <- apply(cv.errors.fwd, 2, mean)
+fwd_opt_preds = which.min(mean.cv.errors.fwd)
+plot(mean.cv.errors.fwd, type = "b", col = ifelse(1:length(mean.cv.errors.fwd) == fwd_opt_preds, "red", "black"), main="Forward Stepwise Selection Mean CV Error", xlab="Predictors Used", ylab="Mean CV Error")
+```
+
+Based on the chart above, forward stepwise selection suggests 54 predictors.
+In this case it makes even more sense to consider if a lower number of predictors is possible.
+
+```{r}
+fwd_opt <- regsubsets(Customer.Lifetime.Value.Log ~. + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type, data = train, nvmax = fwd_opt_preds, method = "forward")
+plot_subset_selection(fwd_opt)
+```
+
+The metrics provide different optimal quantity of predictors.
+We will once again opt for BIC criterion and 15 variables
+
+```{r}
+p=15
+coef(fwd_opt, p)
+```
+
+### 3.2.3 Backward Selection
+
+Finally, backward stepwise selection is implemented.
+
+```{r}
+cv.errors.bwd <- matrix(NA, k, nvmax, dimnames = list(NULL, paste(1:nvmax)))
+```
+
+```{r}
+set.seed(532)
+for (j in 1:k) {
+  best.fit <- regsubsets(Customer.Lifetime.Value.Log ~ . + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type,
+       data = train[folds != j, ],
+       nvmax = nvmax, method = "backward")
+  for (i in 1:nvmax) {
+    pred <- predict(best.fit, train[folds == j, ], id = i)
+    cv.errors.bwd[j, i] <-
+         mean((train$Customer.Lifetime.Value.Log[folds == j] - pred)^2)
+   }
+ }
+```
+
+```{r}
+mean.cv.errors.bwd <- apply(cv.errors.bwd, 2, mean)
+bwd_opt_preds = which.min(mean.cv.errors.bwd)
+plot(mean.cv.errors.bwd, type = "b", col = ifelse(1:length(mean.cv.errors.bwd) == bwd_opt_preds, "red", "black"))
+```
+
+Backward selection proposes a model with 24 predictors
+
+```{r}
+bwd_opt <- regsubsets(Customer.Lifetime.Value.Log ~. + Monthly.Premium.Auto:Coverage + 
+    Vehicle.Class:Vehicle.Size + Coverage:Renew.Offer.Type + 
+    Sales.Channel:Policy.Type, data = train, nvmax = bwd_opt_preds, method = "backward")
+plot_subset_selection(bwd_opt)
+```
+
+As before, BIC-suggested number of features is selected.
+
+```{r}
+p=17
+coef(bwd_opt, p)
+```
+
+### 3.2.4 Comparison
+
+Now we can compare the features, considered important by the subset selection algorithms implemented above.
+We will use unique number of variables for each of the algorithm.
+
+```{r}
+data.frame(list(
+  Best = c(names(coef(bss_opt, 11))[-1], rep(NA, 17-11)),
+  Forward = c(names(coef(fwd_opt, 15))[-1], rep(NA, 17-15)),
+  Backward = names(coef(bwd_opt, 17))[-1]
+))
+cat("Common Predictors\n")
+intersect(intersect(names(coef(fwd_opt, 15)[-1]), names(coef(bss_opt, 11)[-1])), names(coef(bwd_opt, 17))[-1])
+# write.csv(data.frame(list(
+#   Best = c(names(coef(bss_opt, 11))[-1], rep(NA, 16-11)),
+#   Forward = c(names(coef(fwd_opt, 14))[-1], rep(NA, 16-14)),
+#   Backward = names(coef(bwd_opt, 16))[-1]
+# )), file = "subsets.csv", row.names = F)
+```
+
+In common, the algorithms in common treated coverage, "employed" employment status, gender, "single" marital status, monthly premium, the fact of complaint, number of policies, "SUV" and "sports car" vehicle classes as the most influential features.
+Forward and backward selection also outlined the importance of interaction between insurance coverage tariff and monthly premium.
+
+```{r}
+sel_sum = selection_summary(
+  list(Best=bss_opt, Forward=fwd_opt, Backward=bwd_opt),
+  predictors = list(Best=11, Forward=15, Backward=17),
+  train, test
+)
+sel_sum
+# write.csv(selection_summary(
+#   list(Best=bss_opt, Forward=fwd_opt, Backward=bwd_opt),
+#   predictors = list(Best=11, Forward=14, Backward=16),
+#   train, test
+# ), file="selections.csv", row.names = F)
+```
+
+Based on performance, backward selection shown the best results on both sets.
+Most likely it pertains to the fact that the backward selection model is the most complex out of the three considered.
+Moreover it has the highest number of predictors.
+
+```{r}
+coef(bwd_opt, 17)
+```
+
+## 3.3 Shrinkage Methods
+
+### 3.3.1 Ridge Regression
+
+First shrinkage method to be implemented will be Ridge regression.
+To begin with, scaling will be applied to numeric features, since both ridge and lasso favor the same scale of predictors.
+
+```{r}
+train_scaled <- scale_vars(train)
+test_scaled <- scale_vars(test)
+
+X_train <- model.matrix(formula, train_scaled)[, -1]
+y_train <- train_scaled$Customer.Lifetime.Value.Log
+
+X_test <- model.matrix(formula, test_scaled)[, -1]
+y_test <- test_scaled$Customer.Lifetime.Value.Log
+```
+
+First, cross-validation is carried out to determine an optimal value of lambda
+
+```{r}
+cv_ridge = cv.glmnet(X_train, y_train, alpha=0, standardize = F)
+plot(cv_ridge)
+```
+
+There are two options for the optimal lambda selection, which is why ridge model will be refitted with respect to each of the possible values, and then the results will be compared
+
+```{r}
+ridge_lambda.min = glmnet(X_train, y_train, lambda = cv_ridge$lambda.min, alpha=0, standardize = F)
+ridge_lambda.1se = glmnet(X_train, y_train, lambda = cv_ridge$lambda.1se, alpha=0, standardize = F)
+```
+
+In general, there are two ways to determine optimal value of lambda, either by selecting the one which leads to the lowest mean cross-validation error, or according to one standard error rule.
+In order to select the one out of the two, we compared the train and test set metrics for the refitted models with respective lambdas in the table below.
+
+```{r}
+models_summary(list(
+  Ridge_Min = ridge_lambda.min, Ridge_1SE = ridge_lambda.1se
+), X_train, X_test, y_train, y_test)
+# write.csv(models_summary(list(
+#   Ridge_Min = ridge_lambda.min, Ridge_1SE = ridge_lambda.1se
+# ), X_train, X_test, y_train, y_test), file="ridge.csv", row.names = F)
+```
+
+The optimal lambda turned out to be the same for both of the rules, which is why any model can be selected among the two.
+We can also check the coefficients.
+
+```{r}
+predict(ridge_lambda.min, type = "coefficients")
+```
+
+### 3.3.2 Lasso Regression
+
+Let us repeat the same procedure for lasso
+
+```{r}
+cv_lasso = cv.glmnet(X_train, y_train, alpha=1, standardize = F)
+```
+
+```{r}
+lasso_lambda.min = glmnet(X_train, y_train, lambda = cv_lasso$lambda.min, alpha=1, standardize = F)
+lasso_lambda.1se = glmnet(X_train, y_train, lambda = cv_lasso$lambda.1se, alpha=1, standardize = F)
+```
+
+```{r}
+models_summary(list(
+  Lasso_Min = lasso_lambda.min, Lasso_1SE = lasso_lambda.1se
+), X_train, X_test, y_train, y_test)
+# write.csv(models_summary(list(
+#   Lasso_Min = lasso_lambda.min, Lasso_1SE = lasso_lambda.1se
+# ), X_train, X_test, y_train, y_test), file="lasso.csv", row.names=F)
+```
+
+Unlike in the case of ridge, for lasso there is a difference in optimal lambda among 2 methods.
+Since lambda chosen according to the minimum cross-validation error gives lower RMSE, MAE, and higher R-squared, this model shall be selected.
+Additionally, we can see which features turned out to have non-zero coefficients
+
+```{r}
+lasso_coeffs = predict(lasso_lambda.min, type = "coefficients")
+as.matrix(lasso_coeffs)[which(as.matrix(lasso_coeffs) != 0),]
+length(as.matrix(lasso_coeffs)[which(as.matrix(lasso_coeffs) != 0),])
+length(coef(ridge_lambda.min))
+```
+
+### 3.3.3 Comparison
+
+Let us then compare which model fits the data better, ridge or lasso
+
+```{r}
+lasso_lambda.min$lambda
+models_summary(list(
+  Ridge_Min = ridge_lambda.min, Lasso_Min = lasso_lambda.min
+), X_train, X_test, y_train, y_test)
+# write.csv(models_summary(list(
+#   Ridge_Min = ridge_lambda.min, Lasso_Min = lasso_lambda.min
+# ), X_train, X_test, y_train, y_test), file="lasso_ridge.csv", row.names = F)
+```
+
+Lasso regression provides a significantly better fit in terms of RMSE and MAE.
+The difference in R2 is less substantial, which is due to the high dimensionality of the data in general.
+It is also notable that coefficients of 6 predictors were reduced to zero, and therefore lasso needed less variables to make predictions.
+However, it is worth mentioning lasso was not that selective compared to subset selection algorithms.
+This is because optimal lambda is 3.771922e-05, which is a number extremely close to zero.
+We can try selecting different lambda, perhaps a higher one, and compare the results
+
+```{r}
+grid <- 10^seq(10, -2, length = 100)
+cv_lasso_grid = cv.glmnet(X_train, y_train, alpha=1, standardize = F, lambda = grid)
+```
+
+```{r}
+lasso_grid_lambda.min = glmnet(X_train, y_train, lambda = cv_lasso_grid$lambda.min, alpha=1, standardize = F)
+lasso_grid_lambda.1se = glmnet(X_train, y_train, lambda = cv_lasso_grid$lambda.1se, alpha=1, standardize = F)
+```
+
+```{r}
+lasso_grid_coeffs = predict(lasso_grid_lambda.min, type = "coefficients")
+as.matrix(lasso_grid_coeffs)[which(as.matrix(lasso_grid_coeffs) != 0),]
+length(as.matrix(lasso_grid_coeffs)[which(as.matrix(lasso_grid_coeffs) != 0),])
+length(coef(ridge_lambda.min))
+```
+
+```{r}
+models_summary(list(
+  Lasso_Grid_Min = lasso_grid_lambda.min, Lasso_Grid_1SE = lasso_grid_lambda.1se
+), X_train, X_test, y_train, y_test)
+```
+
+The same lambda was selected according to both rules
+
+```{r}
+lasso_grid_lambda.min$lambda
+lasso_lambda.min$lambda
+lasso_sum = models_summary(list(
+  Lasso_Grid_Min = lasso_grid_lambda.min, Lasso_Min = lasso_lambda.min
+), X_train, X_test, y_train, y_test)
+lasso_sum
+# write.csv(models_summary(list(
+#   Lasso_Grid_Min = lasso_grid_lambda.min, Lasso_Min = lasso_lambda.min
+# ), X_train, X_test, y_train, y_test), file="lasso_grid.csv", row.names = F)
+```
+
+All in all, the model with the lower penalty performed better on both training and test data sets.
+However, it is important to mention that higher lambda selected only 8 predictors, whereas lower "stopped" at 56.
+According to the "Lasso_Grid_Min" model, important variables were income, number of policies, monthly premium and its interaction with premium coverage, as well as extended coverage and SUV vehicle class.
+
+# 4. Other Models
+
+As another step in the research, we wanted to find out if there is possible to achieve a more accurate fit than for the methods implemented above.
+The methods included Decision Tree, Random Forest (RF), Gradient Boosting Machine (GBM), K Nearest Neighbors (KNN).
+In the subsequent paragraph a short overview of each method will be provided.
+A more deep explanation of theese algorithms is given at the report.
+
+## 4.1 Decision Tree
+
+```{r}
+set.seed(532)
+control <- trainControl(method = "cv", number = 5, search = "grid")
+param_grid <- expand.grid(cp = seq(0.001, 0.1, length.out = 20))
+
+tuned_tree <- train(Customer.Lifetime.Value.Log ~ ., data = train, method = "rpart",
+                    trControl = control, tuneGrid = param_grid)
+```
+
+```{r}
+set.seed(532)
+final_tree <- rpart(Customer.Lifetime.Value.Log ~ ., data = train, control = rpart.control(cp = tuned_tree$bestTune$cp))
+
+tree_summ <- models_summary(list(Tree = final_tree), train, test,
+               train$Customer.Lifetime.Value.Log, test$Customer.Lifetime.Value.Log, F)
+tree_summ
+```
+
+```{r}
+importance_tree <- varImp(tuned_tree)$importance %>% top_n(5)
+
+g_tree = ggplot(data=importance_tree, mapping=aes(x=reorder(row.names(importance_tree), Overall), y=Overall)) +
+  geom_bar(stat="identity", fill = "steelblue", color="Black") +
+  labs(x = "", y = "Importance", title = "Decision Tree Feature Importance") +
+  theme_minimal() +
+  theme(plot.title = element_text(size=10, face="bold"),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8, face="bold")) +
+  coord_flip()
+g_tree
+```
+
+## 4.2 Random Forest
+
+```{r}
+set.seed(532)
+final_rf <- randomForest(Customer.Lifetime.Value.Log ~ ., data = train)
+
+rf_sum <- models_summary(list(RF = final_rf), train, test,
+               train$Customer.Lifetime.Value.Log, test$Customer.Lifetime.Value.Log, F)
+rf_sum
+```
+
+```{r}
+importance_rf <- varImp(final_rf) %>% top_n(5)
+
+g_rf = ggplot(data=importance_rf, mapping=aes(x=reorder(row.names(importance_rf), Overall), y=Overall)) +
+  geom_bar(stat="identity", fill = "steelblue", color="Black") +
+  labs(x = "", y = "Importance", title = "RF Feature Importance") +
+  coord_flip() +
+  theme_minimal() +
+  theme(plot.title = element_text(size=10, face="bold"),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8, face="bold")) +
+  coord_flip()
+g_rf
+```
+
+## 4.3 Gradient Boosting Machine
+
+```{r}
+library(gbm)
+set.seed(532)
+
+final_gbm <- gbm(Customer.Lifetime.Value.Log ~ ., data = train, distribution = "gaussian", n.trees = 100, interaction.depth = 4, shrinkage = 0.1)
+
+gbm_sum <- models_summary(list(GMB = final_gbm), train, test,
+               train$Customer.Lifetime.Value.Log,
+               test$Customer.Lifetime.Value.Log, F)
+gbm_sum
+```
+
+```{r}
+gbm_importance <- summary(final_gbm, n.trees = 100, plot = FALSE)
+gbm_importance_df <- data.frame(Feature = rownames(gbm_importance),
+                                Importance = gbm_importance$rel.inf) %>% top_n(5)
+rownames(gbm_importance_df) <- NULL
+
+gbm_importance_df <- gbm_importance_df[order(-gbm_importance_df$Importance),]
+
+g_gbm = ggplot(gbm_importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "GBM Feature Importance", x = "", y = "Importance") +
+  theme_minimal() +
+  theme(plot.title = element_text(size=10, face="bold"),
+        axis.text.x = element_text(size=8),
+        axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8, face="bold")) +
+  coord_flip()
+g_gbm
+```
+
+## 4.4 KNN
+
+```{r}
+library(kknn)
+set.seed(532)
+
+final_knn <- kknn::kknn(Customer.Lifetime.Value.Log ~ ., train = train_scaled, test = test_scaled, k = 3, scale = FALSE)
+
+knn_sum = models_summary(list(KNN = final_knn), test_scaled, test_scaled,
+               test_scaled$Customer.Lifetime.Value.Log,
+               test_scaled$Customer.Lifetime.Value.Log, F) %>% filter(Subset != "train")
+knn_sum
+```
+
+## 4.5 Performance Comparison
+
+Finally, let us evaluate the performance of all 5 algorithms and compare it with each other, as well as best models from the subset selection and shrinkage methods sections.
+The table below provides a comparison within the frame of RMSE, MAE, and R-squared.
+
+```{r}
+all_models = rbind(sel_sum %>% filter(Model == "Backward"), lasso_sum %>% filter(Model == "Lasso_Min"), tree_summ, rf_sum, gbm_sum, knn_sum)
+all_models
+write.csv(all_models, file = "all_models.csv", row.names = F)
+```
+
+```{r}
+grid.arrange(g_tree, g_rf, g_gbm, ncol=2)
+```
+
+Pretty much all agree that MPA and NumOfPolicies and sometimes Vehicle Class are the most important.
+
+# 5. One-at-a-Time Sensitivity Analysis
+
+One-at-a-Time (OAT) sensitivity analysis is a type of sensitivity analysis that involves varying one input variable at a time while holding all other variables constant, and observing the effect of each individual variable on the output of a model.
+In the context of a Random Forest regression model, OAT sensitivity analysis involves analyzing how changes in each numeric input variable individually impact the model's predictions, while keeping all other variables constant.
+
+```{r}
+model <- randomForest(Customer.Lifetime.Value.Log ~ ., data = df)
+```
+
+```{r}
+mode_vec <- function(x) {
+    unique_x <- unique(x)
+    tabulated <- tabulate(match(x, unique_x))
+    unique_x[which.max(tabulated)]
+  }
+mode_vec(df$State)
+```
+
+```{r}
+oat_sensitivity <- function(df, model, var, range_pct = 0.1) {
+  min_val <- min(df[[var]], na.rm = TRUE)
+  max_val <- max(df[[var]], na.rm = TRUE)
+  range_val <- max_val - min_val
+  var_values <- seq(min_val - range_pct * range_val,
+                    max_val + range_pct * range_val,
+                    length.out = 100)
+
+ 
+  new_row <- df[1, ]
+
+  for (colname in colnames(new_row)) {
+    if (is.numeric(new_row[[colname]])) {
+      new_row[[colname]] <- median(df[[colname]], na.rm = TRUE)
+    } else {
+      new_row[[colname]] <- mode_vec(df[[colname]])
+    }
+  }
+
+  predictions <- numeric(length(var_values))
+
+  for (i in 1:length(var_values)) {
+    new_row[[var]] <- var_values[i]
+
+    predictions[i] <- predict(model, new_row)
+  }
+
+  return(data.frame(var_values = var_values, predictions = predictions))
+}
+
+
+```
+
+```{r}
+numeric_vars <- c("Income", "Monthly.Premium.Auto",
+                  "Months.Since.Last.Claim", "Months.Since.Policy.Inception", "Total.Claim.Amount")
+
+sensitivity_results <- list()
+for (var in numeric_vars) {
+  sensitivity_results[[var]] <- oat_sensitivity(df, model, var)
+}
+```
+
+```{r}
+plot_oat <- function(data, var_name) {
+  ggplot(data, aes(x = var_values, y = predictions)) +
+    geom_line() +
+    labs(title = paste("OAT Sensitivity Analysis for", var_name),
+         x = var_name,
+         y = "Predicted CLV")
+}
+
+for (var in numeric_vars) {
+  print(plot_oat(sensitivity_results[[var]], var))
+}
+clv_range_df <- data.frame(variable = numeric_vars,
+                           min_value = sapply(sensitivity_results, function(x) min(x$predictions)),
+                           max_value = sapply(sensitivity_results, function(x) max(x$predictions)),
+                           difference = sapply(sensitivity_results, function(x) max(x$predictions) - min(x$predictions)))
+
+clv_range_df
+
+
+```
+
+As you can see as MPA went up, the mean CLV Log of those 100 rows seems to increase.
+Moreover, it increases in a much bigger way than Total Claim Amount and Income.
+But we can see that as these 3 variables increase, the predicted CLV increases but at different rates
